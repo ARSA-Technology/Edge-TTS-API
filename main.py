@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # Configuration
-OUTPUT_DIR = "/app/output"
+OUTPUT_DIR = str(os.getenv("OUTPUT_DIR", "./app/output"))
 MAX_TEXT_LENGTH = int(os.getenv("TTS_MAX_TEXT_LENGTH", "5000"))
 CLEANUP_INTERVAL = int(os.getenv("TTS_CLEANUP_INTERVAL", "3600"))
 

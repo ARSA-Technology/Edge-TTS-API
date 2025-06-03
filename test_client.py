@@ -57,10 +57,10 @@ def test_indonesian_tts(api_base):
         print("🇮🇩 Testing Indonesian TTS...")
         
         request_data = {
-            "text": "Selamat datang di ARSA Technology. Kami adalah perusahaan AI dan IoT terdepan di Indonesia yang menghadirkan solusi teknologi canggih dengan akurasi tinggi untuk transformasi digital bisnis Anda.",
-            "voice": "female",
-            "rate": "+15%",
-            "pitch": "+30Hz",
+            "text": "Selamat datang di Arsa Technology. Kami adalah perusahaan A I dan IoT terdepan di Indonesia yang menghadirkan solusi teknologi canggih dengan akurasi tinggi untuk transformasi digital bisnis Anda.",
+            "voice": "male",
+            "rate": "+0%",
+            "pitch": "-10Hz",
             "language": "indonesian",
             "output_format": "wav"
         }
@@ -102,7 +102,7 @@ def test_english_tts(api_base):
         print("🇺🇸 Testing English TTS...")
         
         request_data = {
-            "text": "Welcome to ARSA Technology. We are Indonesia's leading AI and IoT company, providing cutting-edge technology solutions with 99.67% accuracy in face recognition and comprehensive IoT monitoring systems.",
+            "text": "Welcome to Arsa Technology. We are Indonesia's leading AI and IoT company, providing cutting-edge technology solutions with 99.67% accuracy in face recognition and comprehensive IoT monitoring systems.",
             "voice": "female_us",
             "rate": "+10%",
             "language": "english",
@@ -145,7 +145,7 @@ def test_batch_tts(api_base):
         
         batch_requests = [
             {
-                "text": "ARSA Technology menghadirkan solusi AI terdepan untuk industri Indonesia.",
+                "text": "Arsa Technology menghadirkan solusi AI terdepan untuk industri Indonesia.",
                 "voice": "female",
                 "language": "indonesian"
             },
