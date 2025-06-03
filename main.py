@@ -1,264 +1,388 @@
-#!/usr/bin/env python3
-"""
-Test client for ARSA Technology Edge-TTS API
-Usage: python test_client.py [SERVER_IP]
-"""
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import edge_tts
+import asyncio
+import os
+import uuid
+from datetime import datetime
+from typing import Optional, List
+import logging
+import aiofiles
 
-import requests
-import json
-import sys
-import time
-from pathlib import Path
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def get_api_base():
-    """Get API base URL from command line or prompt"""
-    if len(sys.argv) > 1:
-        server_ip = sys.argv[1]
-    else:
-        server_ip = input("Enter server IP (or press Enter for localhost): ").strip()
-        if not server_ip:
-            server_ip = "localhost"
-    
-    return f"http://{server_ip}:8021"
+app = FastAPI(
+    title="ARSA Technology - Edge TTS API",
+    description="Indonesian Text-to-Speech API using Microsoft Edge TTS",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
-def test_health(api_base):
-    """Test API health"""
-    try:
-        print("🔍 Testing health check...")
-        response = requests.get(f"{api_base}/health", timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        print(f"✅ Health: {result['status']} - {result['timestamp']}")
-        return True
-    except Exception as e:
-        print(f"❌ Health check failed: {e}")
-        return False
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def test_voices(api_base):
-    """Test voice listing"""
-    try:
-        print("🎤 Testing voice listing...")
-        response = requests.get(f"{api_base}/voices", timeout=10)
-        response.raise_for_status()
-        voices = response.json()
-        
-        print("✅ Available voices:")
-        for voice in voices:
-            print(f"   {voice['voice_id']}: {voice['description']} ({voice['language']})")
-        
-        return True
-    except Exception as e:
-        print(f"❌ Voice listing failed: {e}")
-        return False
+# Configuration
+OUTPUT_DIR = "/app/output"
+MAX_TEXT_LENGTH = int(os.getenv("TTS_MAX_TEXT_LENGTH", "5000"))
+CLEANUP_INTERVAL = int(os.getenv("TTS_CLEANUP_INTERVAL", "3600"))
 
-def test_indonesian_tts(api_base):
-    """Test Indonesian TTS generation"""
-    try:
-        print("🇮🇩 Testing Indonesian TTS...")
-        
-        request_data = {
-            "text": "Selamat datang di ARSA Technology. Kami adalah perusahaan AI dan IoT terdepan di Indonesia yang menghadirkan solusi teknologi canggih dengan akurasi tinggi untuk transformasi digital bisnis Anda.",
-            "voice": "female",
-            "rate": "+15%",
-            "pitch": "+30Hz",
-            "language": "indonesian",
-            "output_format": "wav"
-        }
-        
-        print("   Generating speech...")
-        response = requests.post(f"{api_base}/tts", json=request_data, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        
-        if result["success"]:
-            print(f"✅ Indonesian TTS generated:")
-            print(f"   Audio ID: {result['audio_id']}")
-            print(f"   Duration: {result['duration_estimate']}s")
-            print(f"   Voice: {result['voice_used']}")
-            print(f"   File size: {result['file_size']} bytes")
-            
-            # Download the audio file
-            print("   Downloading audio...")
-            audio_url = f"{api_base}{result['audio_url']}"
-            audio_response = requests.get(audio_url, timeout=30)
-            audio_response.raise_for_status()
-            
-            filename = f"test_indonesian_{result['audio_id']}.wav"
-            Path(filename).write_bytes(audio_response.content)
-            print(f"💾 Audio saved as: {filename}")
-            
-            return True
-        else:
-            print(f"❌ TTS failed: {result}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Indonesian TTS failed: {e}")
-        return False
+# Ensure output directory exists
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def test_english_tts(api_base):
-    """Test English TTS generation"""
-    try:
-        print("🇺🇸 Testing English TTS...")
-        
-        request_data = {
-            "text": "Welcome to ARSA Technology. We are Indonesia's leading AI and IoT company, providing cutting-edge technology solutions with 99.67% accuracy in face recognition and comprehensive IoT monitoring systems.",
-            "voice": "female_us",
-            "rate": "+10%",
-            "language": "english",
-            "output_format": "wav"
-        }
-        
-        print("   Generating speech...")
-        response = requests.post(f"{api_base}/tts", json=request_data, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        
-        if result["success"]:
-            print(f"✅ English TTS generated:")
-            print(f"   Audio ID: {result['audio_id']}")
-            print(f"   Duration: {result['duration_estimate']}s")
-            print(f"   Voice: {result['voice_used']}")
-            
-            # Download the audio file
-            audio_url = f"{api_base}{result['audio_url']}"
-            audio_response = requests.get(audio_url, timeout=30)
-            audio_response.raise_for_status()
-            
-            filename = f"test_english_{result['audio_id']}.wav"
-            Path(filename).write_bytes(audio_response.content)
-            print(f"💾 Audio saved as: {filename}")
-            
-            return True
-        else:
-            print(f"❌ English TTS failed: {result}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ English TTS failed: {e}")
-        return False
+# Indonesian voices configuration
+INDONESIAN_VOICES = {
+    "female": {
+        "name": "id-ID-GadisNeural",
+        "gender": "Female",
+        "description": "Natural Indonesian female voice - Professional"
+    },
+    "male": {
+        "name": "id-ID-ArdiNeural", 
+        "gender": "Male",
+        "description": "Natural Indonesian male voice - Authoritative"
+    }
+}
 
-def test_batch_tts(api_base):
-    """Test batch TTS generation"""
-    try:
-        print("📦 Testing batch TTS...")
-        
-        batch_requests = [
-            {
-                "text": "ARSA Technology menghadirkan solusi AI terdepan untuk industri Indonesia.",
+# English voices for international content
+ENGLISH_VOICES = {
+    "female_us": {
+        "name": "en-US-AriaNeural",
+        "gender": "Female",
+        "description": "Natural US English female voice"
+    },
+    "male_us": {
+        "name": "en-US-GuyNeural",
+        "gender": "Male",
+        "description": "Natural US English male voice"
+    }
+}
+
+ALL_VOICES = {**INDONESIAN_VOICES, **ENGLISH_VOICES}
+
+# Pydantic models
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "female"
+    rate: str = "+0%"  # -50% to +100%
+    pitch: str = "+0Hz"  # -50Hz to +50Hz
+    volume: str = "+0%"  # -50% to +50%
+    language: str = "indonesian"  # indonesian or english
+    output_format: str = "wav"  # wav or mp3
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "text": "Selamat datang di ARSA Technology, perusahaan AI terdepan di Indonesia",
                 "voice": "female",
+                "rate": "+10%",
+                "pitch": "+25Hz",
                 "language": "indonesian"
-            },
-            {
-                "text": "Teknologi pengenalan wajah dengan akurasi 99 koma 67 persen.",
-                "voice": "male", 
-                "language": "indonesian"
-            },
-            {
-                "text": "IoT sensors for smart manufacturing and predictive maintenance.",
-                "voice": "female_us",
-                "language": "english"
             }
-        ]
-        
-        print("   Processing batch...")
-        response = requests.post(f"{api_base}/tts/batch", json=batch_requests, timeout=60)
-        response.raise_for_status()
-        result = response.json()
-        
-        if result["batch_success"]:
-            print(f"✅ Batch TTS completed:")
-            print(f"   Total requests: {result['total_requests']}")
-            print(f"   Successful: {result['successful']}")
-            print(f"   Failed: {result['failed']}")
-            
-            for i, res in enumerate(result['results']):
-                if res.get('success'):
-                    print(f"   {i+1}. ✅ {res['text_preview']}")
-                else:
-                    print(f"   {i+1}. ❌ {res['text_preview']} - {res.get('error', 'Unknown error')}")
-            
-            return True
-        else:
-            print(f"❌ Batch TTS failed: {result}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Batch TTS failed: {e}")
-        return False
+        }
 
-def test_stats(api_base):
-    """Test service statistics"""
-    try:
-        print("📊 Testing service statistics...")
-        response = requests.get(f"{api_base}/stats", timeout=10)
-        response.raise_for_status()
-        stats = response.json()
-        
-        print("✅ Service statistics:")
-        print(f"   Audio files: {stats['total_audio_files']}")
-        print(f"   Total size: {stats['total_size_mb']} MB")
-        print(f"   Available voices: {stats['available_voices']}")
-        print(f"   Max text length: {stats['max_text_length']} chars")
-        print(f"   Cleanup interval: {stats['cleanup_interval_hours']} hours")
-        
-        return True
-    except Exception as e:
-        print(f"❌ Stats test failed: {e}")
-        return False
+class TTSResponse(BaseModel):
+    success: bool
+    message: str
+    audio_id: str
+    audio_url: str
+    duration_estimate: Optional[float] = None
+    voice_used: str
+    file_size: Optional[int] = None
 
-def main():
-    print("🎬 ARSA Technology Edge-TTS API Test Suite")
-    print("=" * 50)
-    
-    api_base = get_api_base()
-    print(f"📡 Testing API at: {api_base}")
-    print()
-    
-    # Test suite
-    tests = [
-        ("Health Check", test_health),
-        ("Voice Listing", test_voices),
-        ("Indonesian TTS", test_indonesian_tts),
-        ("English TTS", test_english_tts),
-        ("Batch TTS", test_batch_tts),
-        ("Service Stats", test_stats)
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test_name, test_func in tests:
-        print(f"🧪 {test_name}")
-        try:
-            if test_func(api_base):
-                passed += 1
-            else:
-                failed += 1
-        except KeyboardInterrupt:
-            print("\n⚠️ Test interrupted by user")
-            break
-        except Exception as e:
-            print(f"❌ {test_name} crashed: {e}")
-            failed += 1
-        
-        print()
-        time.sleep(1)  # Brief pause between tests
-    
-    # Results
-    print("=" * 50)
-    print(f"📊 Test Results:")
-    print(f"✅ Passed: {passed}")
-    print(f"❌ Failed: {failed}")
-    print(f"📈 Success Rate: {(passed/(passed+failed)*100):.1f}%" if (passed+failed) > 0 else "No tests run")
-    
-    if failed == 0:
-        print("\n🎉 All tests passed! Your Edge-TTS API is working perfectly!")
-        print(f"🌐 API accessible at: {api_base}")
-        print(f"📖 Documentation: {api_base}/docs")
+class VoiceInfo(BaseModel):
+    voice_id: str
+    name: str
+    gender: str
+    description: str
+    language: str
+
+# Utility functions
+def estimate_duration(text: str, language: str = "indonesian") -> float:
+    """Estimate audio duration based on text length and language"""
+    word_count = len(text.split())
+    # Indonesian: ~120 words/minute, English: ~150 words/minute
+    words_per_minute = 120 if language.lower() == "indonesian" else 150
+    duration_minutes = word_count / words_per_minute
+    return round(duration_minutes * 60, 2)
+
+def get_voice_name(voice: str, language: str) -> str:
+    """Get the actual voice name for Edge TTS"""
+    if language.lower() == "english":
+        return ENGLISH_VOICES.get(voice, ENGLISH_VOICES["female_us"])["name"]
     else:
-        print(f"\n⚠️ {failed} test(s) failed. Check your configuration.")
-        print("💡 Tip: Make sure Docker services are running and ports are open")
+        return INDONESIAN_VOICES.get(voice, INDONESIAN_VOICES["female"])["name"]
+
+async def cleanup_old_files():
+    """Clean up audio files older than cleanup interval"""
+    try:
+        current_time = datetime.now().timestamp()
+        for filename in os.listdir(OUTPUT_DIR):
+            file_path = os.path.join(OUTPUT_DIR, filename)
+            if os.path.isfile(file_path) and filename.endswith(('.wav', '.mp3')):
+                file_age = current_time - os.path.getctime(file_path)
+                if file_age > CLEANUP_INTERVAL:
+                    os.remove(file_path)
+                    logger.info(f"Cleaned up old file: {filename}")
+    except Exception as e:
+        logger.error(f"Error cleaning up files: {e}")
+
+# API Routes
+@app.get("/")
+async def root():
+    return {
+        "service": "ARSA Technology Edge-TTS API",
+        "version": "1.0.0",
+        "status": "running",
+        "supported_languages": ["Indonesian", "English"],
+        "endpoints": {
+            "tts": "/tts - Generate speech",
+            "voices": "/voices - List available voices",
+            "health": "/health - Health check",
+            "stats": "/stats - Service statistics",
+            "audio": "/audio/{audio_id} - Download audio",
+            "docs": "/docs - API documentation"
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "edge-tts-api",
+        "output_dir_writable": os.access(OUTPUT_DIR, os.W_OK)
+    }
+
+@app.get("/voices", response_model=List[VoiceInfo])
+async def list_voices():
+    """List all available voices"""
+    voices = []
+    
+    # Indonesian voices
+    for voice_id, voice_data in INDONESIAN_VOICES.items():
+        voices.append(VoiceInfo(
+            voice_id=voice_id,
+            name=voice_data["name"],
+            gender=voice_data["gender"],
+            description=voice_data["description"],
+            language="Indonesian"
+        ))
+    
+    # English voices
+    for voice_id, voice_data in ENGLISH_VOICES.items():
+        voices.append(VoiceInfo(
+            voice_id=voice_id,
+            name=voice_data["name"], 
+            gender=voice_data["gender"],
+            description=voice_data["description"],
+            language="English"
+        ))
+    
+    return voices
+
+@app.post("/tts", response_model=TTSResponse)
+async def generate_speech(request: TTSRequest, background_tasks: BackgroundTasks):
+    """Generate speech from text"""
+    try:
+        # Validate input
+        if not request.text.strip():
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        if len(request.text) > MAX_TEXT_LENGTH:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Text too long (max {MAX_TEXT_LENGTH} characters)"
+            )
+        
+        # Get voice name
+        voice_name = get_voice_name(request.voice, request.language)
+        
+        # Generate unique ID for this audio
+        audio_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Determine file extension
+        file_extension = "wav" if request.output_format.lower() == "wav" else "mp3"
+        filename = f"arsa_tts_{timestamp}_{audio_id}.{file_extension}"
+        output_file = os.path.join(OUTPUT_DIR, filename)
+        
+        # Create TTS communicate object
+        communicate = edge_tts.Communicate(
+            text=request.text,
+            voice=voice_name,
+            rate=request.rate,
+            pitch=request.pitch,
+            volume=request.volume
+        )
+        
+        # Generate and save audio
+        await communicate.save(output_file)
+        
+        # Verify file was created
+        if not os.path.exists(output_file):
+            raise HTTPException(status_code=500, detail="Failed to generate audio file")
+        
+        # Get file size
+        file_size = os.path.getsize(output_file)
+        
+        # Estimate duration
+        duration = estimate_duration(request.text, request.language)
+        
+        # Schedule cleanup
+        background_tasks.add_task(cleanup_old_files)
+        
+        logger.info(f"Generated audio: {audio_id} for voice: {voice_name}, size: {file_size} bytes")
+        
+        return TTSResponse(
+            success=True,
+            message="Audio generated successfully",
+            audio_id=audio_id,
+            audio_url=f"/audio/{audio_id}",
+            duration_estimate=duration,
+            voice_used=voice_name,
+            file_size=file_size
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TTS generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate speech: {str(e)}")
+
+@app.get("/audio/{audio_id}")
+async def download_audio(audio_id: str):
+    """Download generated audio file"""
+    try:
+        # Find file with this audio_id in the filename
+        for filename in os.listdir(OUTPUT_DIR):
+            if audio_id in filename and filename.endswith(('.wav', '.mp3')):
+                file_path = os.path.join(OUTPUT_DIR, filename)
+                if os.path.exists(file_path):
+                    # Determine media type
+                    media_type = "audio/wav" if filename.endswith('.wav') else "audio/mpeg"
+                    
+                    return FileResponse(
+                        file_path,
+                        media_type=media_type,
+                        filename=f"arsa_tts_{audio_id}.{'wav' if filename.endswith('.wav') else 'mp3'}"
+                    )
+        
+        raise HTTPException(status_code=404, detail="Audio file not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Audio download error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to download audio")
+
+@app.post("/tts/batch")
+async def generate_batch_speech(requests: List[TTSRequest], background_tasks: BackgroundTasks):
+    """Generate multiple speech files in batch"""
+    try:
+        if len(requests) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 requests per batch")
+        
+        results = []
+        
+        for i, req in enumerate(requests):
+            try:
+                # Generate speech for each request
+                voice_name = get_voice_name(req.voice, req.language)
+                audio_id = str(uuid.uuid4())
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                file_extension = "wav" if req.output_format.lower() == "wav" else "mp3"
+                filename = f"arsa_batch_{timestamp}_{i}_{audio_id}.{file_extension}"
+                output_file = os.path.join(OUTPUT_DIR, filename)
+                
+                communicate = edge_tts.Communicate(
+                    text=req.text,
+                    voice=voice_name,
+                    rate=req.rate,
+                    pitch=req.pitch,
+                    volume=req.volume
+                )
+                
+                await communicate.save(output_file)
+                
+                file_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
+                duration = estimate_duration(req.text, req.language)
+                
+                results.append({
+                    "success": True,
+                    "audio_id": audio_id,
+                    "audio_url": f"/audio/{audio_id}",
+                    "duration_estimate": duration,
+                    "voice_used": voice_name,
+                    "file_size": file_size,
+                    "text_preview": req.text[:50] + "..." if len(req.text) > 50 else req.text
+                })
+                
+            except Exception as e:
+                results.append({
+                    "success": False,
+                    "error": str(e),
+                    "text_preview": req.text[:50] + "..." if len(req.text) > 50 else req.text
+                })
+        
+        background_tasks.add_task(cleanup_old_files)
+        
+        return {
+            "batch_success": True,
+            "total_requests": len(requests),
+            "successful": len([r for r in results if r.get("success")]),
+            "failed": len([r for r in results if not r.get("success")]),
+            "results": results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch TTS error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
+
+@app.get("/stats")
+async def get_stats():
+    """Get service statistics"""
+    try:
+        # Count files in output directory
+        files = os.listdir(OUTPUT_DIR) if os.path.exists(OUTPUT_DIR) else []
+        audio_files = [f for f in files if f.endswith(('.wav', '.mp3'))]
+        
+        # Calculate total size
+        total_size = 0
+        for f in audio_files:
+            file_path = os.path.join(OUTPUT_DIR, f)
+            if os.path.exists(file_path):
+                total_size += os.path.getsize(file_path)
+        
+        return {
+            "total_audio_files": len(audio_files),
+            "total_size_bytes": total_size,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+            "available_voices": len(ALL_VOICES),
+            "supported_languages": ["Indonesian", "English"],
+            "max_text_length": MAX_TEXT_LENGTH,
+            "cleanup_interval_hours": CLEANUP_INTERVAL / 3600,
+            "output_directory": OUTPUT_DIR
+        }
+        
+    except Exception as e:
+        logger.error(f"Stats error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get statistics")
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8021)
