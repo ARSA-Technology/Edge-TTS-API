@@ -7,12 +7,11 @@ services:
     ports:
       - "0.0.0.0:8021:8021"
     volumes:
-      - ./output:/app/output
+      - tts_output:/app/output
     environment:
       - PYTHONUNBUFFERED=1
       - TTS_MAX_TEXT_LENGTH=5000
       - TTS_CLEANUP_INTERVAL=3600
-      - OUTPUT_DIR=/app/output
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8021/health"]
@@ -29,3 +28,4 @@ networks:
 
 volumes:
   tts_output:
+    driver: local
