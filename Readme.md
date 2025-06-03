@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115.12-green.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 
 **Professional Indonesian Text-to-Speech API** built by [ARSA Technology](https://arsa.technology) using Microsoft Edge TTS.
