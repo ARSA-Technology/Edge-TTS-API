@@ -1,41 +1,31 @@
-FROM python:3.11-slim
+version: '3.8'
 
-# Set working directory
-WORKDIR /app
+services:
+  edge-tts:
+    build: .
+    container_name: arsa-edge-tts
+    ports:
+      - "0.0.0.0:8021:8021"
+    volumes:
+      - tts_output:/app/output
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TTS_MAX_TEXT_LENGTH=5000
+      - TTS_CLEANUP_INTERVAL=3600
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8021/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - tts-network
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+networks:
+  tts-network:
+    driver: bridge
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY main.py .
-
-# Create output directory with proper permissions
-RUN mkdir -p /app/output && \
-    chmod 755 /app/output
-
-# Create non-root user for security
-RUN useradd -m -u 1000 ttsuser && \
-    chown -R ttsuser:ttsuser /app
-
-# Switch to non-root user
-USER ttsuser
-
-# Expose port
-EXPOSE 8021
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8021/health || exit 1
-
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8021", "--workers", "1"]
+volumes:
+  tts_output:
+    driver: local
